@@ -1,16 +1,16 @@
-// SurfaceMuteBridge — Surface Headphones のミュート操作を検知して Teams に橋渡しするヘルパー（試作）
+// SurfaceMuteBridge — detects the mute gesture on Surface Headphones and forwards it to the call app.
 //
-// 仕組み:
-//   ミュート操作をすると、ヘッドフォンは「マイク音量 0」を Mac に 1 回通知する。
-//   Mac 側は約 0.02 秒で音量を元に戻すため、ヘッドフォン自体はミュートにならない。
-//   この一瞬の「音量 0」を 1 回の押下とみなし、Teams のミュートを切り替える。
+// How it works:
+//   On a mute gesture, the headset sends a single "mic gain 0" event to the Mac.
+//   The Mac restores the volume within about 0.02 s, so the headset itself never stays muted.
+//   That brief "volume 0" is treated as one press and toggles mute in the call app.
 //
-// 使い方:
+// Usage:
 //   swiftc -O SurfaceMuteBridge.swift -o SurfaceMuteBridge
-//   ./SurfaceMuteBridge                  # 検知のみ（押下を表示するだけ）
-//   ./SurfaceMuteBridge --teams          # 押下ごとに、マイク使用中の通話アプリ（Teams / Zoom）へ
-//                                        # ミュート切り替えのショートカットを送る
-//   ./SurfaceMuteBridge --verbose        # 生の通知もすべて表示
+//   ./SurfaceMuteBridge                  # detect only (just prints each press)
+//   ./SurfaceMuteBridge --teams          # on each press, send the mute-toggle shortcut to the
+//                                        # call app using the microphone (Teams / Zoom / Meet)
+//   ./SurfaceMuteBridge --verbose        # also print every raw notification
 //   ./SurfaceMuteBridge --device "Surface Headphones"
 
 import AppKit
@@ -18,13 +18,13 @@ import ApplicationServices
 import CoreAudio
 import Foundation
 
-// MARK: - 設定
+// MARK: - Configuration
 
 var deviceNameFragment = "Surface Headphones"
 var verbose = false
 var sendToTeams = false
 let teamsBundleID = "com.microsoft.teams2"
-let debounceSeconds = 0.6      // 1 回の押下で届く通知のかたまりをまとめる時間
+let debounceSeconds = 0.6      // window for grouping the burst of notifications one press produces
 let zeroThreshold: Float = 0.05
 
 do {
@@ -47,7 +47,7 @@ let clock: DateFormatter = {
 }()
 func log(_ s: String) { print("\(clock.string(from: Date())) \(s)") }
 
-// MARK: - CoreAudio ヘルパー
+// MARK: - CoreAudio helpers
 
 func allDevices() -> [AudioDeviceID] {
     var addr = AudioObjectPropertyAddress(
@@ -81,7 +81,7 @@ func hasInputStreams(_ id: AudioDeviceID) -> Bool {
     return AudioObjectGetPropertyDataSize(id, &addr, 0, nil, &size) == noErr && size > 0
 }
 
-/// 入力音量（0.0〜1.0）。要素 0（マスター）と 1 を順に試す。
+/// Input volume (0.0–1.0). Tries element 0 (master), then element 1.
 func inputVolume(_ id: AudioDeviceID) -> Float? {
     for element: UInt32 in [0, 1] {
         var addr = AudioObjectPropertyAddress(
@@ -96,11 +96,11 @@ func inputVolume(_ id: AudioDeviceID) -> Float? {
     return nil
 }
 
-// MARK: - 押下の判定
+// MARK: - Press detection
 
-/// 音量通知の列から「ミュート操作が 1 回あった」を取り出す。
-/// 通常: 0 → すぐ元の音量、というかたまりが 1 回の押下。
-/// 例外: Mac が音量を戻さず 0 のまま残った場合は、次に 0 以外へ戻った時も 1 回の押下とする。
+/// Turns the stream of volume notifications into "one mute gesture happened".
+/// Normal case: a burst of 0 followed right away by the original volume is one press.
+/// Exception: if the Mac leaves the volume at 0, the next change back to non-zero is also one press.
 final class PressDetector {
     private var lastPress = Date.distantPast
     private var stuckAtZero = false
@@ -120,10 +120,11 @@ final class PressDetector {
         }
     }
 
-    /// 押下の少し後に呼び、音量が 0 のまま残っているかを記録する
+    /// Called periodically to record whether the volume has stayed at 0 after a press.
     func settle(current v: Float?) {
         guard let v = v else { return }
-        // 押下の瞬間の 0 をたまたま読んだだけ、という取り違えを避けるため 2 回連続で確認する
+        // Require two consecutive readings so that catching the momentary 0 of a press
+        // is not mistaken for the volume being stuck at 0.
         zeroTicks = v <= zeroThreshold ? zeroTicks + 1 : 0
         if Date().timeIntervalSince(lastPress) > debounceSeconds {
             stuckAtZero = zeroTicks >= 2
@@ -134,23 +135,24 @@ final class PressDetector {
     func reset() { stuckAtZero = false; zeroTicks = 0 }
 }
 
-// MARK: - Teams への送信
+// MARK: - Sending to call apps
 
-/// 対応する通話アプリ。micPrefix はマイク使用中かどうかの判定に使う（補助プロセスも拾うため前方一致）。
+/// A supported call app. micPrefix decides whether the app is using the microphone
+/// (prefix match, so helper processes are picked up too).
 struct CallApp {
     let name: String
-    let bundleID: String      // キーの送り先
+    let bundleID: String      // where the key is sent
     let micPrefix: String
     let keyCode: CGKeyCode
     let flags: CGEventFlags
     let keyLabel: String
-    var canSend: (() -> Bool)? = nil   // 送ってよい状況かの追加確認（ブラウザ用）
+    var canSend: (() -> Bool)? = nil   // extra check that sending is safe right now (for browsers)
 }
 
 let chromeBundleID = "com.google.Chrome"
 
-/// Chrome の最前面ウィンドウで表示中のタブが Meet かどうか。
-/// Meet のショートカット Cmd+D は、他のタブでは「ブックマークに追加」になるため必ず確認する。
+/// Whether the visible tab of Chrome's front window is Meet.
+/// Meet's shortcut Cmd+D means "bookmark this page" on any other tab, so always check first.
 func chromeFrontTabIsMeet() -> Bool {
     guard !NSRunningApplication.runningApplications(withBundleIdentifier: chromeBundleID).isEmpty else { return false }
     var isMeet = false
@@ -164,7 +166,7 @@ func chromeFrontTabIsMeet() -> Bool {
         var err: NSDictionary?
         let out = NSAppleScript(source: src)?.executeAndReturnError(&err)
         if let e = err {
-            log("  Chrome に問い合わせできませんでした: \(e[NSAppleScript.errorMessage] ?? e)")
+            log("  Could not query Chrome: \(e[NSAppleScript.errorMessage] ?? e)")
         }
         isMeet = out?.stringValue?.hasPrefix("https://meet.google.com/") ?? false
     }
@@ -180,9 +182,9 @@ let callApps = [
     CallApp(name: "Meet (Chrome)", bundleID: chromeBundleID, micPrefix: chromeBundleID,
             keyCode: 2, flags: [.maskCommand], keyLabel: "Cmd+D", canSend: chromeFrontTabIsMeet),
 ]
-var lastTarget: String?   // 直前に送ったアプリ（マイクを手放すアプリ向けの予備）
+var lastTarget: String?   // the app last sent to (fallback for apps that release the microphone)
 
-/// いまマイクを使っているプロセスのバンドル ID 一覧
+/// Bundle IDs of the processes currently using the microphone.
 func micUserBundleIDs() -> [String] {
     var addr = AudioObjectPropertyAddress(
         mSelector: kAudioHardwarePropertyProcessObjectList,
@@ -214,10 +216,10 @@ func micUserBundleIDs() -> [String] {
     return result
 }
 
-/// アプリを前面に出さずに、ミュート切り替えのショートカットを送る
+/// Sends the mute-toggle shortcut to the app without bringing it to the front.
 func sendToggle(to app: CallApp) {
     guard let running = NSRunningApplication.runningApplications(withBundleIdentifier: app.bundleID).first else {
-        log("  \(app.name) が起動していないため送信しませんでした")
+        log("  \(app.name) is not running; nothing sent")
         return
     }
     let src = CGEventSource(stateID: .hidSystemState)
@@ -227,33 +229,33 @@ func sendToggle(to app: CallApp) {
     up.flags = app.flags
     down.postToPid(running.processIdentifier)
     up.postToPid(running.processIdentifier)
-    log("  \(app.name) (pid \(running.processIdentifier)) に \(app.keyLabel) を送信")
+    log("  Sent \(app.keyLabel) to \(app.name) (pid \(running.processIdentifier))")
 }
 
-/// マイクを使っている通話アプリへ送る。見つからなければ直前に送ったアプリへ送る。
+/// Sends to the call app that is using the microphone; if none is found, to the app last sent to.
 func toggleCallMute() {
     let users = micUserBundleIDs()
     var targets = callApps.filter { app in users.contains { $0.hasPrefix(app.micPrefix) } }
     if targets.isEmpty, let last = lastTarget, let app = callApps.first(where: { $0.bundleID == last }) {
-        log("  マイク使用中の対応アプリなし（使用中: \(users)）→ 直前の \(app.name) へ送ります")
+        log("  No supported app is using the microphone (in use by: \(users)); falling back to \(app.name)")
         targets = [app]
     }
     if targets.isEmpty {
-        log("  マイク使用中の対応アプリなし（使用中: \(users)）→ 送信しませんでした")
+        log("  No supported app is using the microphone (in use by: \(users)); nothing sent")
         return
     }
-    // ブラウザは、Meet のタブが表示中のときだけ送る
+    // For browsers, send only while the Meet tab is the visible one.
     let allowed = targets.filter { app in
         guard let check = app.canSend else { return true }
         if check() { return true }
-        log("  \(app.name): Meet のタブが表示中ではないため送信しませんでした")
+        log("  \(app.name): the Meet tab is not the visible tab; nothing sent")
         return false
     }
     for app in allowed { sendToggle(to: app) }
     if allowed.count == 1 { lastTarget = allowed[0].bundleID }
 }
 
-// MARK: - デバイス監視
+// MARK: - Device monitoring
 
 let queue = DispatchQueue(label: "surface-mute-bridge")
 let detector = PressDetector()
@@ -281,25 +283,25 @@ func attachIfNeeded() {
     detach()
     detector.reset()
     guard let id = target else {
-        log("「\(deviceNameFragment)」の入力デバイスが見つかりません。接続を待ちます。")
+        log("No input device matching \"\(deviceNameFragment)\" found; waiting for it to connect.")
         return
     }
     let block: AudioObjectPropertyListenerBlock = { _, _ in
         guard let v = inputVolume(id) else { return }
-        if verbose { log("  通知: 入力音量 = \(String(format: "%.2f", v))") }
+        if verbose { log("  Notification: input volume = \(String(format: "%.2f", v))") }
         detector.volumeChanged(to: v)
     }
     let err = AudioObjectAddPropertyListenerBlock(id, &volumeAddr, queue, block)
     if err != noErr {
-        log("音量の監視を登録できませんでした (OSStatus \(err))")
+        log("Could not register the volume listener (OSStatus \(err))")
         return
     }
     watched = id
     volumeListener = block
-    log("監視開始: \(deviceName(id)) 現在の入力音量 = \(inputVolume(id).map { String(format: "%.2f", $0) } ?? "不明")")
+    log("Watching: \(deviceName(id)), current input volume = \(inputVolume(id).map { String(format: "%.2f", $0) } ?? "unknown")")
 }
 
-// 接続・切断に追従する
+// Follow connects and disconnects.
 var devicesAddr = AudioObjectPropertyAddress(
     mSelector: kAudioHardwarePropertyDevices,
     mScope: kAudioObjectPropertyScopeGlobal,
@@ -308,32 +310,32 @@ AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &de
     attachIfNeeded()
 }
 
-// MARK: - 起動
+// MARK: - Startup
 
 detector.onPress = {
-    log("● ミュート操作を検知")
+    log("● Mute gesture detected")
     if sendToTeams { toggleCallMute() }
 }
 
 if sendToTeams {
-    // 他アプリへキーを送るにはアクセシビリティの許可が必要
+    // Sending keys to another app requires the Accessibility permission.
     let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
     let trusted = AXIsProcessTrustedWithOptions(opts)
-    log(trusted ? "アクセシビリティ: 許可済み" : "アクセシビリティ: 未許可（システム設定で許可するまで Teams には届きません）")
+    log(trusted ? "Accessibility: granted" : "Accessibility: not granted (keys will not reach the call app until it is allowed in System Settings)")
     if !trusted {
-        // 許可されたら再起動なしで気づけるよう、定期的に確認する
+        // Poll so that a later grant is noticed without a restart.
         let axTimer = DispatchSource.makeTimerSource(queue: queue)
         axTimer.schedule(deadline: .now() + 2, repeating: 2)
         axTimer.setEventHandler {
             if AXIsProcessTrusted() {
-                log("アクセシビリティ: 許可済み")
+                log("Accessibility: granted")
                 axTimer.cancel()
             }
         }
         axTimer.resume()
     }
 } else {
-    log("検知のみのモードです（Teams へ送るには --teams）")
+    log("Detect-only mode (pass --teams to send to the call app)")
 }
 
 queue.async { attachIfNeeded() }

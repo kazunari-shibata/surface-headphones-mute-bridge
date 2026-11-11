@@ -1,7 +1,7 @@
 #!/bin/zsh
-# SurfaceMuteBridge をビルドして ~/Applications に置き、ログイン時に自動起動するよう登録する。
-# 作り直すたびに署名が変わるため、実行後はシステム設定 → プライバシーとセキュリティ →
-# アクセシビリティで SurfaceMuteBridge を一度オフ→オンにし直すこと。
+# Builds SurfaceMuteBridge, installs it into ~/Applications, and registers it to start at login.
+# Every rebuild changes the code signature, so after running this, turn SurfaceMuteBridge off and
+# on again in System Settings → Privacy & Security → Accessibility.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -10,7 +10,7 @@ APP="$HOME/Applications/SurfaceMuteBridge.app"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/Library/Logs/SurfaceMuteBridge.log"
 
-echo "ビルド中..."
+echo "Building..."
 swiftc -O SurfaceMuteBridge.swift -o SurfaceMuteBridge
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$HOME/Library/LaunchAgents"
@@ -29,7 +29,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleShortVersionString</key><string>0.3</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSUIElement</key><true/>
-  <key>NSAppleEventsUsageDescription</key><string>Meet のタブが表示中かどうかを Chrome に確認します。</string>
+  <key>NSAppleEventsUsageDescription</key><string>Checks with Chrome whether the Meet tab is the visible tab.</string>
 </dict>
 </plist>
 EOF
@@ -61,4 +61,4 @@ else
   launchctl bootstrap "gui/$(id -u)" "$PLIST"
 fi
 
-echo "設置しました。アクセシビリティの許可を確認してください。ログ: $LOG"
+echo "Installed. Check the Accessibility permission. Log: $LOG"

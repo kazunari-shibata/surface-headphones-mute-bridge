@@ -48,14 +48,10 @@ The following permissions are needed on first install, and again after every reb
 tail -20 ~/Library/Logs/SurfaceMuteBridge.log
 ```
 
-- No "ミュート操作を検知" (mute gesture detected) line when you press: check that the
-  headset is the active input device. The event is only sent while the microphone is in
-  use, i.e. during a call.
-- "アクセシビリティ: 未許可" (Accessibility: not granted): redo the permission step above.
-- "マイク使用中の対応アプリなし" (no supported app is using the microphone): an
-  unsupported app is holding the microphone.
-
-Log messages are currently written in Japanese.
+- No "Mute gesture detected" line when you press: check that the headset is the active
+  input device. The event is only sent while the microphone is in use, i.e. during a call.
+- "Accessibility: not granted": redo the permission step above.
+- "No supported app is using the microphone": an unsupported app is holding the microphone.
 
 ## Uninstall
 
