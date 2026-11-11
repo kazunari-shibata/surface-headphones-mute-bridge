@@ -72,3 +72,7 @@ swiftc -O SurfaceMuteBridge.swift -o SurfaceMuteBridge
 - アプリ側がショートカットを変えた場合は `SurfaceMuteBridge.swift` の `callApps` を直す必要があります。
 - 同じウィンドウで Meet 以外のタブを表示している間は、Meet には送りません
   （Cmd+D が「ブックマークに追加」になるため）。
+
+## ライセンス
+
+[MIT](LICENSE)
