@@ -1,21 +1,21 @@
 #!/bin/zsh
-# Builds SurfaceMuteBridge, installs it into ~/Applications, and registers it to start at login.
-# Every rebuild changes the code signature, so after running this, turn SurfaceMuteBridge off and
+# Builds SurfaceHeadphonesMuteBridge, installs it into ~/Applications, and registers it to start at login.
+# Every rebuild changes the code signature, so after running this, turn SurfaceHeadphonesMuteBridge off and
 # on again in System Settings → Privacy & Security → Accessibility.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-LABEL=local.surface-mute-bridge
-APP="$HOME/Applications/SurfaceMuteBridge.app"
+LABEL=local.surface-headphones-mute-bridge
+APP="$HOME/Applications/SurfaceHeadphonesMuteBridge.app"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-LOG="$HOME/Library/Logs/SurfaceMuteBridge.log"
+LOG="$HOME/Library/Logs/SurfaceHeadphonesMuteBridge.log"
 
 echo "Building..."
-swiftc -O SurfaceMuteBridge.swift -o SurfaceMuteBridge
+swiftc -O SurfaceHeadphonesMuteBridge.swift -o SurfaceHeadphonesMuteBridge
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$HOME/Library/LaunchAgents"
-cp SurfaceMuteBridge "$APP/Contents/MacOS/SurfaceMuteBridge"
-cp SurfaceMuteBridge.swift "$APP/Contents/Resources/SurfaceMuteBridge.swift"
+cp SurfaceHeadphonesMuteBridge "$APP/Contents/MacOS/SurfaceHeadphonesMuteBridge"
+cp SurfaceHeadphonesMuteBridge.swift "$APP/Contents/Resources/SurfaceHeadphonesMuteBridge.swift"
 
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -23,8 +23,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key><string>$LABEL</string>
-  <key>CFBundleName</key><string>SurfaceMuteBridge</string>
-  <key>CFBundleExecutable</key><string>SurfaceMuteBridge</string>
+  <key>CFBundleName</key><string>SurfaceHeadphonesMuteBridge</string>
+  <key>CFBundleExecutable</key><string>SurfaceHeadphonesMuteBridge</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.3</string>
   <key>CFBundleVersion</key><string>1</string>
@@ -43,7 +43,7 @@ cat > "$PLIST" <<EOF
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$APP/Contents/MacOS/SurfaceMuteBridge</string>
+    <string>$APP/Contents/MacOS/SurfaceHeadphonesMuteBridge</string>
     <string>--teams</string>
   </array>
   <key>RunAtLoad</key><true/>

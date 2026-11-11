@@ -1,4 +1,4 @@
-// SurfaceMuteBridge — detects the mute gesture on Surface Headphones and forwards it to the call app.
+// SurfaceHeadphonesMuteBridge — detects the mute gesture on Surface Headphones and forwards it to the call app.
 //
 // How it works:
 //   On a mute gesture, the headset sends a single "mic gain 0" event to the Mac.
@@ -6,12 +6,12 @@
 //   That brief "volume 0" is treated as one press and toggles mute in the call app.
 //
 // Usage:
-//   swiftc -O SurfaceMuteBridge.swift -o SurfaceMuteBridge
-//   ./SurfaceMuteBridge                  # detect only (just prints each press)
-//   ./SurfaceMuteBridge --teams          # on each press, send the mute-toggle shortcut to the
+//   swiftc -O SurfaceHeadphonesMuteBridge.swift -o SurfaceHeadphonesMuteBridge
+//   ./SurfaceHeadphonesMuteBridge                  # detect only (just prints each press)
+//   ./SurfaceHeadphonesMuteBridge --teams          # on each press, send the mute-toggle shortcut to the
 //                                        # call app using the microphone (Teams / Zoom / Meet)
-//   ./SurfaceMuteBridge --verbose        # also print every raw notification
-//   ./SurfaceMuteBridge --device "Surface Headphones"
+//   ./SurfaceHeadphonesMuteBridge --verbose        # also print every raw notification
+//   ./SurfaceHeadphonesMuteBridge --device "Surface Headphones"
 
 import AppKit
 import ApplicationServices
@@ -257,7 +257,7 @@ func toggleCallMute() {
 
 // MARK: - Device monitoring
 
-let queue = DispatchQueue(label: "surface-mute-bridge")
+let queue = DispatchQueue(label: "surface-headphones-mute-bridge")
 let detector = PressDetector()
 var watched: AudioDeviceID?
 var volumeListener: AudioObjectPropertyListenerBlock?
